@@ -8,6 +8,11 @@ use anyhow::anyhow;
 
 #[derive(Debug, PartialEq)]
 pub struct Null;
+impl fmt::Display for Null {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Null")
+    }
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Value {
@@ -19,15 +24,28 @@ pub enum Value {
     Number(f64),
 }
 
+impl Value {
+    pub fn get_type(&self) -> String {
+        match self {
+            Value::Object(_) => "Object",
+            Value::Array(_) => "Array",
+            Value::String(_) => "String",
+            Value::Bool(_) => "Bool",
+            Value::Null(_) => "Null",
+            Value::Number(_) => "Number",
+        }.to_string()
+    }
+}
+
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Object(_) => write!(f, "Object"),
-            Value::Array(_) => write!(f, "Array"),
-            Value::String(_) => write!(f, "String"),
-            Value::Bool(_) => write!(f, "Bool"),
-            Value::Null(_) => write!(f, "Null"),
-            Value::Number(_) => write!(f, "Number"),
+            Value::Object(o) => write!(f, "{o:?}"),
+            Value::Array(a) => write!(f, "{a:?}"),
+            Value::String(s) => write!(f, "{s}"),
+            Value::Bool(b) => write!(f, "{b}"),
+            Value::Null(n) => write!(f, "{n}"),
+            Value::Number(n) => write!(f, "{n}"),
         }
     }
 }
@@ -38,6 +56,17 @@ impl Index<&str> for Value {
     fn index(&self, index: &str) -> &Self::Output {
         match self {
             Value::Object(object) => &object[index],
+            _ => panic!("{self} can't be indexed by {index}."),
+        }
+    }
+}
+
+impl Index<String> for Value {
+    type Output = Value;
+
+    fn index(&self, index: String) -> &Self::Output {
+        match self {
+            Value::Object(object) => &object[index.as_str()],
             _ => panic!("{self} can't be indexed by {index}."),
         }
     }
