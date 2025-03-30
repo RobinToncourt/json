@@ -1,10 +1,16 @@
 use std::collections::HashMap;
-use std::iter::Peekable;
-use std::str::Chars;
 use std::fmt;
+use std::iter::Peekable;
 use std::ops::Index;
+use std::str::Chars;
 
 use anyhow::anyhow;
+
+pub trait Getter<T> {
+    type Output;
+
+    fn get(&self, index: T) -> Option<&Self::Output>;
+}
 
 #[derive(Debug, PartialEq)]
 pub struct Null;
@@ -22,19 +28,6 @@ pub enum Value {
     Bool(bool),
     Null(Null),
     Number(f64),
-}
-
-impl Value {
-    pub fn get_type(&self) -> String {
-        match self {
-            Value::Object(_) => "Object",
-            Value::Array(_) => "Array",
-            Value::String(_) => "String",
-            Value::Bool(_) => "Bool",
-            Value::Null(_) => "Null",
-            Value::Number(_) => "Number",
-        }.to_string()
-    }
 }
 
 impl fmt::Display for Value {
@@ -83,6 +76,42 @@ impl Index<usize> for Value {
     }
 }
 
+impl Getter<&str> for Value {
+    type Output = Self;
+
+    fn get(&self, index: &str) -> Option<&Self::Output> {
+        match self {
+            Value::Object(object) => object.get(index),
+            _ => None,
+        }
+    }
+}
+
+impl Getter<String> for Value {
+    type Output = Self;
+
+    fn get(&self, index: String) -> Option<&Self::Output> {
+        match self {
+            Value::Object(object) => object.get(&index),
+            _ => None,
+        }
+    }
+}
+
+impl Getter<usize> for Value {
+    type Output = Self;
+
+    fn get(&self, index: usize) -> Option<&Self::Output> {
+        match self {
+            Value::Array(array) => array.get(index),
+            _ => None,
+        }
+    }
+}
+
+/// # Errors
+///
+/// Will return `Err` if the json is malformed.
 pub fn parse_json(content: &str) -> anyhow::Result<Value> {
     let mut chars = content.chars().peekable();
 
@@ -165,24 +194,21 @@ fn parse_string(chars: &mut Peekable<Chars>) -> anyhow::Result<String> {
     let mut last_char: Option<char> = None;
     let mut string_buffer = String::new();
 
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => {
-                if let Some(lc) = last_char {
-                    if lc == '\\' {
-                        last_char = Some(c);
-                        string_buffer.push(c);
-                    } else {
-                        return Ok(string_buffer);
-                    }
+    for c in chars {
+        if c == '"' {
+            if let Some(lc) = last_char {
+                if lc == '\\' {
+                    last_char = Some(c);
+                    string_buffer.push(c);
                 } else {
                     return Ok(string_buffer);
                 }
+            } else {
+                return Ok(string_buffer);
             }
-            _ => {
-                last_char = Some(c);
-                string_buffer.push(c);
-            }
+        } else {
+            last_char = Some(c);
+            string_buffer.push(c);
         }
     }
 
@@ -226,95 +252,100 @@ fn parse_number(chars: &mut Peekable<Chars>, first: char) -> anyhow::Result<f64>
 mod json_test {
     use super::*;
 
-    const TEXT: &str = r#"
-        {
-        "glossary": {
-        "title": "example glossary",
-        "GlossDiv": {
-        "title": "S",
-        "GlossList": {
-        "GlossEntry": {
-        "ID": "SGML",
-        "SortAs": "SGML",
-        "GlossTerm": "Standard Generalized Markup Language",
-        "Acronym": "SGML",
-        "Abbrev": "ISO 8879:1986",
-        "GlossDef": {
-        "para": "A meta-markup language, used to create markup languages such as DocBook.",
-        "GlossSeeAlso": ["GML", "XML"]
-    },
-    "GlossSee": "markup",
-    "SomeNull": null
-    }
-    }
-    }
-    },
-    "autre": "rien",
-    "nothing": "",
-    "guillemet": "\""
-    }
-    "#;
+    const TEXT: &str = r#"{
+    "glossary": {
+    "title": "example glossary",
+    "GlossDiv": {
+    "title": "S",
+    "GlossList": {
+    "GlossEntry": {
+    "ID": "SGML",
+    "SortAs": "SGML",
+    "GlossTerm": "Standard Generalized Markup Language",
+    "Acronym": "SGML",
+    "Abbrev": "ISO 8879:1986",
+    "GlossDef": {
+    "para": "A meta-markup language, used to create markup languages such as DocBook.",
+    "GlossSeeAlso": ["GML", "XML"]
+},
+"GlossSee": "markup",
+"SomeNull": null
+}
+}
+}
+},
+"autre": "rien",
+"nothing": "",
+"guillemet": "\""
+}"#;
 
-    #[test]
-    fn test_parse_string() {
-        let normal = r#"normal": rest of the json..."#;
-        let empty = r#"": rest of the json..."#;
-        // let guillemet = r#"abc\def": rest of the json..."#;
+#[test]
+fn test_getter() {
+    let json = parse_json(TEXT).unwrap();
 
-        assert_eq!(
-            parse_string(&mut normal.chars().peekable()).unwrap(),
-            r#"normal"#.to_string()
-        );
-        assert_eq!(
-            parse_string(&mut empty.chars().peekable()).unwrap(),
-            "".to_string()
-        );
-        // assert_eq!(parse_string(guillemet.chars()), r#"abc"def"#.to_string());
-    }
+    assert!(json.get("glossary").is_some());
+}
 
-    #[test]
-    fn test_parse_bool() {
-        let fale = "false";
-        let tru = "true";
-        let neither = "none";
+#[test]
+fn test_parse_string() {
+    let normal = r#"normal": rest of the json..."#;
+    let empty = r#"": rest of the json..."#;
+    // let guillemet = r#"abc\def": rest of the json..."#;
 
-        let mut fale_chars = fale.chars().peekable();
-        fale_chars.next();
-        let mut tru_chars = tru.chars().peekable();
-        tru_chars.next();
-        let mut neither_chars = neither.chars().peekable();
-        neither_chars.next();
+    assert_eq!(
+        parse_string(&mut normal.chars().peekable()).unwrap(),
+               r#"normal"#.to_string()
+    );
+    assert_eq!(
+        parse_string(&mut empty.chars().peekable()).unwrap(),
+               "".to_string()
+    );
+    // assert_eq!(parse_string(guillemet.chars()), r#"abc"def"#.to_string());
+}
 
-        assert_eq!(parse_bool(&mut fale_chars, false).unwrap(), false);
-        assert_eq!(parse_bool(&mut tru_chars, true).unwrap(), true);
-        assert!(parse_bool(&mut neither_chars, false).is_err());
-    }
+#[test]
+fn test_parse_bool() {
+    let fale = "false";
+    let tru = "true";
+    let neither = "none";
 
-    #[test]
-    fn test_parse_null() {
-        let null = "NULL";
-        let not_null = "not null";
+    let mut fale_chars = fale.chars().peekable();
+    fale_chars.next();
+    let mut tru_chars = tru.chars().peekable();
+    tru_chars.next();
+    let mut neither_chars = neither.chars().peekable();
+    neither_chars.next();
 
-        let mut null_chars = null.chars().peekable();
-        null_chars.next();
-        let mut not_null_chars = not_null.chars().peekable();
-        not_null_chars.next();
+    assert_eq!(parse_bool(&mut fale_chars, false).unwrap(), false);
+    assert_eq!(parse_bool(&mut tru_chars, true).unwrap(), true);
+    assert!(parse_bool(&mut neither_chars, false).is_err());
+}
 
-        assert_eq!(parse_null(&mut null_chars).unwrap(), Null);
-        assert!(parse_null(&mut not_null_chars).is_err());
-    }
+#[test]
+fn test_parse_null() {
+    let null = "NULL";
+    let not_null = "not null";
 
-    #[test]
-    fn test_parse_number() {
-        let integer = "42, rest of the json...";
-        let float = "42.12, rest of the json...";
+    let mut null_chars = null.chars().peekable();
+    null_chars.next();
+    let mut not_null_chars = not_null.chars().peekable();
+    not_null_chars.next();
 
-        let mut integer_chars = integer.chars().peekable();
-        integer_chars.next();
-        let mut float_chars = float.chars().peekable();
-        float_chars.next();
+    assert_eq!(parse_null(&mut null_chars).unwrap(), Null);
+    assert!(parse_null(&mut not_null_chars).is_err());
+}
 
-        assert_eq!(parse_number(&mut integer_chars, '4').unwrap(), 42_f64);
-        assert_eq!(parse_number(&mut float_chars, '4').unwrap(), 42.12_f64);
-    }
+#[test]
+fn test_parse_number() {
+    let integer = "42, rest of the json...";
+    let float = "42.12, rest of the json...";
+
+    let mut integer_chars = integer.chars().peekable();
+    integer_chars.next();
+    let mut float_chars = float.chars().peekable();
+    float_chars.next();
+
+    assert_eq!(parse_number(&mut integer_chars, '4').unwrap(), 42_f64);
+    assert_eq!(parse_number(&mut float_chars, '4').unwrap(), 42.12_f64);
+}
 }
